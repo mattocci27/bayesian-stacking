@@ -1,4 +1,48 @@
+---
+title: "Data Exploration"
+author: "Masatoshi Katabuchi"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    fig_caption: yes
+    theme: spacelab #readable #sandstone #spacelab #flatly
+    highlight: pygments #tango #kate
+    toc: TRUE
+    toc_depth: 2
+    number_sections: TRUE
+    toc_float:
+     collapsed: TRUE
+     smooth_scroll: TRUE
+     toc: true
+---
+
+
+```{r, message=FALSE}
+library(tidyverse)
+library(targets)
+```
 
 ```{r}
+full_draws <- withr::with_dir(rprojroot::find_root('_targets.R'),
+    targets::tar_read(fit_full_draws_model))
+stacked_draws <- withr::with_dir(rprojroot::find_root('_targets.R'),
+    targets::tar_read(stacked_posterior))
 
+tmp1 <- full_draws |>
+  dplyr::select(alpha, beta, sigma)
+tmp2 <- stacked_draws |>
+  as_tibble() |>
+  dplyr::select(alpha, beta, sigma)
+
+df <- bind_rows(tmp1, tmp2) |>
+  mutate(model = rep(c("full", "stacked"), each = nrow(tmp1)))
+
+df_long <- df |>
+  pivot_longer(-model, names_to = "parameter", values_to = "value")
+
+ggplot(df_long, aes(x = value, fill = model)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~parameter, scales = "free") +
+  theme_bw() +
+  theme(legend.position = "bottom")
 ```
