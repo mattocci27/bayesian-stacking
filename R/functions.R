@@ -44,16 +44,26 @@ get_post_para <- function(data, row, col, digits = 2, nsmall = 2) {
     pull({{col}})
 }
 
-#' @title Simulate data from the model.
-#' @param tau tau parameter for the model.
-simulate_schools_data <- function(tau = 5) {
-  list(
-    J = 8,
-    y = c(28, 8, -3, 7, -1, 1, 18, 12),
-    sigma = c(15, 10, 16, 11, 9, 11, 10, 18),
-    tau = tau
-    )
+#' @title Simulate data
+simulate_data <- function(n = 100) {
+  x <- rnorm(n)
+  alpha <- 1
+  beta <- -1
+  mu <- alpha + beta * x
+  y <- rnorm(n, mu, 1)
+  tibble(x = x, y = y)
 }
+
+#' @title Modified createFolds function
+createSingleFold <- function(data, k, i) {
+  fold_sizes <- floor(nrow(data) / k)
+  folds <- split(data, rep(1:k, each = fold_sizes, length.out = nrow(data)))
+  tmp <- folds[[i]]
+  list(N = nrow(tmp), x = tmp$x, y = tmp$y)
+
+}
+
+my_loo <- function(x) x$loo(cores = parallel::detectCores())
 
 #' @title Fit the Stan model
 #' @return dataframe of cmdstan customized summary with diagnostics

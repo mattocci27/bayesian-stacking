@@ -18,13 +18,14 @@ tar_option_set(packages = c(
   "ggrepel",
   "patchwork",
   "janitor",
-  "loo"
+  "loo",
+  "caret"
 ))
 
 # keep memory usage down to a minimum
 tar_option_set(
-  garbage_collection = TRUE,
-  memory = "transient"
+  # garbage_collection = TRUE,
+  # memory = "transient"
 )
 
 # check if it's inside a container
@@ -35,111 +36,61 @@ if (file.exists("/.dockerenv") | file.exists("/.singularity.d/startscript")) {
 
 cmdstan_version()
 
-list(
-  # eight schools
+set.seed(123)
+
+# values <- tibble(n = c(110, 90))
+
+k <- 4
+mapped <- tar_map(
+  values = list(i = 1:k),
   tar_target(
-    schools_data,
-    list(
-      J = 8,
-      y = c(28, 8, -3, 7, -1, 1, 18, 12),
-      sigma = c(15, 10, 16, 11, 9, 11, 10, 18))
+    folds,
+    createSingleFold(simulated_data, k, i)
   ),
-  # fit a single stan model
   tar_stan_mcmc(
-    fit,
-    "stan/model.stan",
-    data = schools_data,
-    refresh = 0,
-    chains = 4,
-    parallel_chains = getOption("mc.cores", 4),
-    iter_warmup = 2000,
-    iter_sampling = 2000,
-    adapt_delta = 0.9,
-    max_treedepth = 15,
-    seed = 123,
-    return_draws = TRUE,
-    return_diagnostics = TRUE,
-    return_summary = TRUE,
-    summaries = list(
-      mean = ~mean(.x),
-      sd = ~sd(.x),
-      mad = ~mad(.x),
-      ~posterior::quantile2(.x, probs = c(0.025, 0.05, 0.25, 0.5, 0.75, 0.95, 0.975)),
-      posterior::default_convergence_measures()
-    )
-  ),
-  # prepare different tau values to pass dynamic branches
-  tar_target(
-    sim_tau,
-    seq(0.01, 40, length = 20)
-  ),
-  # schools data with different tau values (dynamic branches)
-  tar_target(
-    simulated_schools_data,
-    simulate_schools_data(sim_tau),
-    pattern = map(sim_tau)
-  ),
-  # compile stan model so that targets can track
-  tar_target(
-    simulation_stan,
-    compile_model("stan/simulation.stan"),
-    format = "file"
-  ),
-  # fit stan model to each simulated data (dynamic branches)
-  tar_target(
-    sim_fit,
-    fit_sim_model(
-      data = simulated_schools_data,
-      simulation_stan,
+      fit,
+      "stan/model.stan",
+      data = folds,
       refresh = 0,
       chains = 4,
-      parallel_chains = 1,
-      iter_warmup = 2000,
-      iter_sampling = 2000,
-      adapt_delta = 0.9,
+      parallel_chains = getOption("mc.cores", 4),
+      iter_warmup = 1000,
+      iter_sampling = 1000,
+      adapt_delta = 0.95,
       max_treedepth = 15,
-      seed = 123),
-    pattern = map(simulated_schools_data)
-  ),
-  # export summary csv
-  tar_target(
-    summary_csv,
-    my_write_csv(fit_summary_model, "data/fit_summary_model.csv"),
-    format = "file"
-  ),
-  # produce png and pdf figures
-  tar_target(
-    theta_tau_line_plot, {
-      p <- theta_tau_line(sim_fit)
-      my_ggsave(
-        "figs/theta_tau_line",
-        p,
-        height = 3.5,
-        width = 3.5
-      )
-    },
-    format = "file"
-  ),
-  tar_target(
-    theta_intervals_plot, {
-      p <- mcmc_intervals(fit_draws_model, regex_pars = "theta\\[")
-      my_ggsave(
-        "figs/theta_intervals",
-        p,
-        height = 3.5,
-        width = 3.5
-      )
-    },
-    format = "file"
-  ),
+      seed = 123,
+      return_draws = TRUE,
+      return_diagnostics = TRUE,
+      return_summary = TRUE
+    )
+)
 
-  # it's hard to debug quarto using targets at the moment
+# Create a new tar_map for loo calculations
+loo_mapped <- tar_map(
+  values = list(mcmc = rlang::syms(paste0("fit_mcmc_linear_", 1:k))),
+  tar_target(
+    loo,
+    my_loo(mcmc)
+    )
+)
 
-  # tar_quarto(
-  #   manuscript_pdf,
-  #   "ms/manuscript.qmd"
-  # ),
+combined <- tar_combine(
+  combined_loo,
+  loo_mapped[["loo"]],
+  command = list(!!!.x)
+)
 
-  # putting NULL makes easy to remove tar_target from this list
+list(
+  tar_target(
+    simulated_data,
+    simulate_data(n = 1000)
+  ),
+  mapped,
+  loo_mapped,
+  combined,
+  tar_target(
+    model_weights,
+    loo_model_weights(combined_loo, method = "stacking")
+  ),
   NULL
 )
